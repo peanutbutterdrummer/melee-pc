@@ -48,7 +48,12 @@ using webgpu::g_queue;
 namespace {
 constexpr Module Log{"aurora::gfx"};
 
-Resources g_resources;
+// Slot 0 holds everything shared; with per-frame slots (webgpu::g_vertexFetchTextures) slots
+// 1.. add their own buffers, fetch textures and bind groups. resources() returns the slot the
+// calling thread selected for the frame it is recording or encoding.
+std::array<Resources, ResourceSlots> g_resourceSlots;
+Resources& g_resources = g_resourceSlots[0];
+thread_local size_t t_resourceSlot = 0;
 
 enum class BufferMapState {
   Unmapped,
@@ -270,7 +275,11 @@ void map_staging_buffer(size_t slot, bool releaseSlotOnCompletion = false) {
 
 namespace detail {
 
-Resources& resources() noexcept { return g_resources; }
+Resources& resources() noexcept { return g_resourceSlots[t_resourceSlot]; }
+
+void select_resource_slot(uint64_t frameId) noexcept {
+  t_resourceSlot = webgpu::g_vertexFetchTextures ? frameId % ResourceSlots : 0;
+}
 
 const wgpu::Buffer& staging_buffer(size_t slot) { return g_stagingBuffers[slot]; }
 
@@ -444,36 +453,6 @@ void initialize() {
     };
     out = g_device.CreateBuffer(&descriptor);
   };
-  createBuffer(g_resources.uniformBuffer, wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, UniformBufferSize,
-               "Shared Uniform Buffer");
-  createBuffer(g_resources.vertexBuffer,
-               wgpu::BufferUsage::Storage | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst, VertexBufferSize,
-               "Shared Vertex Buffer");
-  createBuffer(g_resources.indexBuffer, wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst, IndexBufferSize,
-               "Shared Index Buffer");
-  createBuffer(g_resources.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, StorageBufferSize,
-               "Shared Storage Buffer");
-  if (webgpu::g_vertexFetchTextures) {
-    // Experiment: AURORA_FETCH_ROWS caps the texture height (data past it is dropped).
-    static const uint32_t rowCap = getenv("AURORA_FETCH_ROWS") ? atoi(getenv("AURORA_FETCH_ROWS")) : 0;
-    const auto createFetchTexture = [](wgpu::Texture& out, uint64_t bufferSize, const char* label) {
-      uint32_t rows = static_cast<uint32_t>(bufferSize / VertexFetchRowBytes);
-      if (rowCap != 0 && rowCap < rows) {
-        rows = rowCap;
-      }
-      const wgpu::TextureDescriptor descriptor{
-          .label = label,
-          .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
-          .size = {VertexFetchRowTexels, rows, 1},
-          .format = wgpu::TextureFormat::R32Uint,
-      };
-      out = g_device.CreateTexture(&descriptor);
-    };
-    for (size_t i = 0; i < VertexFetchRing; ++i) {
-      createFetchTexture(g_resources.vertexFetchTextures[i], VertexBufferSize, "Vertex Fetch Texture");
-      createFetchTexture(g_resources.storageFetchTextures[i], StorageBufferSize, "Storage Fetch Texture");
-    }
-  }
 #ifdef __EMSCRIPTEN__
   g_browserStagingBytes.resize(StagingBufferSize);
 #endif
@@ -520,16 +499,6 @@ void initialize() {
                 },
         },
     };
-    std::array entries{
-        wgpu::BindGroupEntry{
-            .binding = 0,
-            .buffer = g_resources.vertexBuffer,
-        },
-        wgpu::BindGroupEntry{
-            .binding = 1,
-            .buffer = g_resources.storageBuffer,
-        },
-    };
     if (webgpu::g_vertexFetchTextures) {
       // Same bindings as r32uint textures; see gx/shader.cpp (apply_vertex_fetch_textures).
       for (auto& entry : layoutEntries) {
@@ -539,9 +508,6 @@ void initialize() {
             .viewDimension = wgpu::TextureViewDimension::e2D,
         };
       }
-      for (auto& entry : entries) {
-        entry.buffer = nullptr;
-      }
     }
     const wgpu::BindGroupLayoutDescriptor layoutDesc{
         .label = "Static bind group layout",
@@ -549,27 +515,7 @@ void initialize() {
         .entries = layoutEntries.data(),
     };
     g_resources.staticBindGroupLayout = g_device.CreateBindGroupLayout(&layoutDesc);
-    const auto createStaticBindGroup = [&] {
-      const wgpu::BindGroupDescriptor bindGroupDescriptor{
-          .label = "Static bind group",
-          .layout = g_resources.staticBindGroupLayout,
-          .entryCount = entries.size(),
-          .entries = entries.data(),
-      };
-      return g_device.CreateBindGroup(&bindGroupDescriptor);
-    };
-    if (webgpu::g_vertexFetchTextures) {
-      for (size_t i = 0; i < VertexFetchRing; ++i) {
-        entries[0].textureView = g_resources.vertexFetchTextures[i].CreateView();
-        entries[1].textureView = g_resources.storageFetchTextures[i].CreateView();
-        g_resources.fetchBindGroups[i] = createStaticBindGroup();
-      }
-      g_resources.staticBindGroup = g_resources.fetchBindGroups[0];
-    } else {
-      g_resources.staticBindGroup = createStaticBindGroup();
-    }
   }
-
   {
     constexpr std::array layoutEntries{
         // Uniform buffer (dynamic offset)
@@ -589,20 +535,75 @@ void initialize() {
         .entries = layoutEntries.data(),
     };
     g_resources.uniformBindGroupLayout = g_device.CreateBindGroupLayout(&layoutDesc);
-    const std::array entries{
+  }
+
+  // Per-frame resource slots (see select_resource_slot) share slot 0's layouts and limits.
+  const size_t slotCount = webgpu::g_vertexFetchTextures ? ResourceSlots : 1;
+  for (size_t s = 0; s < slotCount; ++s) {
+    auto& res = g_resourceSlots[s];
+    if (s != 0) {
+      res.limits = g_resources.limits;
+      res.staticBindGroupLayout = g_resources.staticBindGroupLayout;
+      res.uniformBindGroupLayout = g_resources.uniformBindGroupLayout;
+    }
+    createBuffer(res.uniformBuffer, wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, UniformBufferSize,
+                 "Shared Uniform Buffer");
+    createBuffer(res.vertexBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+                 VertexBufferSize, "Shared Vertex Buffer");
+    createBuffer(res.indexBuffer, wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst, IndexBufferSize,
+                 "Shared Index Buffer");
+    createBuffer(res.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, StorageBufferSize,
+                 "Shared Storage Buffer");
+
+    std::array staticEntries{
         wgpu::BindGroupEntry{
             .binding = 0,
-            .buffer = g_resources.uniformBuffer,
+            .buffer = res.vertexBuffer,
+        },
+        wgpu::BindGroupEntry{
+            .binding = 1,
+            .buffer = res.storageBuffer,
+        },
+    };
+    if (webgpu::g_vertexFetchTextures) {
+      const auto createFetchTexture = [](wgpu::Texture& out, uint64_t bufferSize, const char* label) {
+        const wgpu::TextureDescriptor descriptor{
+            .label = label,
+            .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
+            .size = {VertexFetchRowTexels, static_cast<uint32_t>(bufferSize / VertexFetchRowBytes), 1},
+            .format = wgpu::TextureFormat::R32Uint,
+        };
+        out = g_device.CreateTexture(&descriptor);
+      };
+      createFetchTexture(res.vertexFetchTexture, VertexBufferSize, "Vertex Fetch Texture");
+      createFetchTexture(res.storageFetchTexture, StorageBufferSize, "Storage Fetch Texture");
+      staticEntries[0].buffer = nullptr;
+      staticEntries[0].textureView = res.vertexFetchTexture.CreateView();
+      staticEntries[1].buffer = nullptr;
+      staticEntries[1].textureView = res.storageFetchTexture.CreateView();
+    }
+    const wgpu::BindGroupDescriptor staticDescriptor{
+        .label = "Static bind group",
+        .layout = res.staticBindGroupLayout,
+        .entryCount = staticEntries.size(),
+        .entries = staticEntries.data(),
+    };
+    res.staticBindGroup = g_device.CreateBindGroup(&staticDescriptor);
+
+    const std::array uniformEntries{
+        wgpu::BindGroupEntry{
+            .binding = 0,
+            .buffer = res.uniformBuffer,
             .size = gx::MaxUniformSize,
         },
     };
-    const wgpu::BindGroupDescriptor bindGroupDescriptor{
+    const wgpu::BindGroupDescriptor uniformDescriptor{
         .label = "Uniform bind group",
-        .layout = g_resources.uniformBindGroupLayout,
-        .entryCount = entries.size(),
-        .entries = entries.data(),
+        .layout = res.uniformBindGroupLayout,
+        .entryCount = uniformEntries.size(),
+        .entries = uniformEntries.data(),
     };
-    g_resources.uniformBindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+    res.uniformBindGroup = g_device.CreateBindGroup(&uniformDescriptor);
   }
 
   gx::initialize();
@@ -642,13 +643,16 @@ void shutdown() {
     g_runtimeEncoderTaskTypes.clear();
     g_freeEncoderTaskTypeSlots.clear();
   }
+  // Buffers, fetch textures and bind groups of slots 1.. (layouts are slot 0's, reset below).
+  for (size_t s = 1; s < ResourceSlots; ++s) {
+    g_resourceSlots[s] = {};
+  }
+  g_resources.vertexFetchTexture = {};
+  g_resources.storageFetchTexture = {};
   g_resources.vertexBuffer = {};
   g_resources.uniformBuffer = {};
   g_resources.indexBuffer = {};
   g_resources.storageBuffer = {};
-  g_resources.vertexFetchTextures.fill({});
-  g_resources.storageFetchTextures.fill({});
-  g_resources.fetchBindGroups.fill({});
   g_stagingBuffers.fill({});
 #ifdef __EMSCRIPTEN__
   EM_ASM({ delete Module.gpuUploadScratch; });
@@ -733,6 +737,7 @@ bool begin_frame() {
   auto& frame = g_framePackets[frameSlot];
   frame = {};
   frame.frameId = g_nextFrameId++;
+  select_resource_slot(frame.frameId);
   frame.frameIndex = g_frameIndex;
   frame.stagingBuffer = *stagingSlot;
   size_t bufferOffset = 0;
@@ -829,7 +834,8 @@ void end_frame(EndFrameCallback callback) {
     g_stagingBuffers[stagingSlot].Unmap();
 #endif
     g_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
-    submit_vertex_fetch_upload(packet);
+    select_resource_slot(packet.frameId);
+    submit_frame_upload(packet);
     auto encoder = std::move(packet.encoder);
     const auto stats = packet.stats;
     auto afterSubmitCallbacks = std::move(packet.afterSubmitCallbacks);
@@ -889,5 +895,5 @@ float calculate_fps() noexcept {
 }
 } // namespace aurora::gfx
 
-const AuroraStats* aurora_get_stats() { return &aurora::gfx::detail::resources().stats; }
+const AuroraStats* aurora_get_stats() { return &aurora::gfx::g_resources.stats; }
 float aurora_get_fps() { return aurora::gfx::calculate_fps(); }

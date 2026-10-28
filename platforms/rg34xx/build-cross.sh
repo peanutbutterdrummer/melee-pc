@@ -24,6 +24,7 @@ $CC -O2 -Wall -fPIC -shared -Wl,-soname,libX11.so.6 -o "$BUILD/shim/lib/libX11.s
     -DAURORA_SDL3_PROVIDER=vendor \
     -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF -DSDL_VULKAN=OFF \
     -DSDL_OFFSCREEN=ON -DSDL_DUMMYVIDEO=ON -DSDL_UNIX_CONSOLE_BUILD=ON \
+    -DCMAKE_CXX_FLAGS=-DAURORA_COMPACT_GPU_POOLS \
     "-DCMAKE_EXE_LINKER_FLAGS=$BUILD/shim/glibc238compat.o $BUILD/shim/libstdcxx13compat.o"
 
 sh "$SRC/platforms/rg34xx/patch-sdl-offscreen.sh" "$BUILD"
