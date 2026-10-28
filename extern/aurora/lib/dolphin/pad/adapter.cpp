@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -155,6 +157,43 @@ std::optional<PhysicalInput> keyboard_input(s32 scancode) {
   return std::nullopt;
 }
 
+/* AURORA_PAD_EXTRA_BUTTONS="leftshoulder:z,...": extra gamepad buttons bound to
+ * a GC button on top of the mapping, which holds one native button per GC
+ * button (the RG34XX launcher uses it to put grab on L1 as well as R1). */
+const std::vector<PADButtonMapping>& extra_button_mappings() {
+  static const std::vector<PADButtonMapping> extras = [] {
+    std::vector<PADButtonMapping> out;
+    const char* env = std::getenv("AURORA_PAD_EXTRA_BUTTONS");
+    if (env == nullptr) {
+      return out;
+    }
+    constexpr std::array<std::pair<const char*, PADButton>, PAD_BUTTON_COUNT> kNames{{
+        {"a", PAD_BUTTON_A}, {"b", PAD_BUTTON_B}, {"x", PAD_BUTTON_X}, {"y", PAD_BUTTON_Y},
+        {"z", PAD_TRIGGER_Z}, {"start", PAD_BUTTON_START}, {"l", PAD_TRIGGER_L}, {"r", PAD_TRIGGER_R},
+        {"up", PAD_BUTTON_UP}, {"down", PAD_BUTTON_DOWN}, {"left", PAD_BUTTON_LEFT}, {"right", PAD_BUTTON_RIGHT},
+    }};
+    const std::string spec{env};
+    size_t pos = 0;
+    while (pos < spec.size()) {
+      const size_t end = std::min(spec.find(',', pos), spec.size());
+      const std::string item = spec.substr(pos, end - pos);
+      pos = end + 1;
+      const size_t colon = item.find(':');
+      if (colon == std::string::npos) {
+        continue;
+      }
+      const auto native = SDL_GetGamepadButtonFromString(item.substr(0, colon).c_str());
+      const std::string pad = item.substr(colon + 1);
+      const auto it = std::ranges::find_if(kNames, [&](const auto& name) { return pad == name.first; });
+      if (native != SDL_GAMEPAD_BUTTON_INVALID && it != kNames.end()) {
+        out.push_back({static_cast<u32>(native), it->second});
+      }
+    }
+    return out;
+  }();
+  return extras;
+}
+
 struct PortInputs {
   SourceId controller = kInvalidSourceId;
   bool keyboardActive = false;
@@ -235,6 +274,18 @@ private:
     constexpr uint32_t kNativeButtonAxisBit = 0x40000000u;
     constexpr uint32_t kNativeButtonAxisNegBit = 0x20000000u;
     const auto& c = controls();
+    for (const auto& extra : extra_button_mappings()) {
+      if (const ControlId target = control_for_button(extra.padButton); target != kInvalidControlId) {
+        out.push_back({
+            .input =
+                {
+                    .source = controller,
+                    .control = PhysicalInput::GamepadButton{static_cast<SDL_GamepadButton>(extra.nativeButton)},
+                },
+            .target = target,
+        });
+      }
+    }
     for (const auto& mapping : buttons) {
       const ControlId target = control_for_button(mapping.padButton);
       if (target == kInvalidControlId) {

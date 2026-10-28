@@ -30,8 +30,10 @@ export HOME="${HOME:-/root}"
 export SDL_VIDEO_DRIVER=offscreen
 export MELEE_BACKEND=gles
 export MELEE_LOG_FILE="$GAMEDIR/melee.log"
-# Built-in pad: printed A/B/X/Y = GameCube A/B/X/Y, R1 = Z, L2/R2 = L/R,
-# right stick = C-stick, Select = settings overlay, Select+Start = quit.
+# Built-in pad, modern Smash layout: A attack, B special, X/Y jump, L1/R1 grab (Z),
+# L2/R2 shield (L/R), right stick = C-stick, Select = settings overlay,
+# Select+Start = quit.
+export AURORA_PAD_EXTRA_BUTTONS="leftshoulder:z"
 export SDL_GAMECONTROLLERCONFIG="19000000010000000100000000010000,ANBERNIC-keys,a:b0,b:b1,x:b3,y:b2,back:b8,guide:b6,start:b7,leftstick:b9,rightstick:b12,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpleft:h0.8,dpdown:h0.4,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b10,righttrigger:b11,platform:Linux,"
 
 # Settings live in melee/user/ (portable.txt). First run: the cheapest settings
