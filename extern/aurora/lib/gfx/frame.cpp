@@ -842,11 +842,11 @@ void end_frame(EndFrameCallback callback) {
     if constexpr (UseTextureBuffer) upload(g_stagingBuffers[stagingSlot], packet.textureUpload, TextureUploadSize);
     browser_upload_pools(g_queue.Get(), entries, count);
 #else
-    select_resource_slot(packet.frameId);
-    submit_frame_upload(packet);
     g_stagingBuffers[stagingSlot].Unmap();
 #endif
     g_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
+    select_resource_slot(packet.frameId);
+    submit_frame_upload(packet);
     auto encoder = std::move(packet.encoder);
     const auto stats = packet.stats;
     auto afterSubmitCallbacks = std::move(packet.afterSubmitCallbacks);
