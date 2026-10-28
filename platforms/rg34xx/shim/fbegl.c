@@ -61,15 +61,23 @@ static void fb_size(void) {
  * mode games normally inherit: WxH, 32 bpp ARGB, double-buffered. */
 static void fb_mode(void) {
     if (getenv("FBEGL_KEEPMODE")) return;
+    /* FBEGL_BUFFERS=3: triple buffering. With two buffers and vblank-locked
+     * swaps, a 23 ms frame waits for the 33 ms vblank; a third buffer lets the
+     * GPU start the next frame instead. */
+    const char* eb = getenv("FBEGL_BUFFERS");
+    unsigned nbuf = eb ? (unsigned)atoi(eb) : 2;
+    if (nbuf < 2 || nbuf > 4) nbuf = 2;
     int fd = open("/dev/fb0", O_RDWR);
     if (fd < 0) return;
     struct fb_var_screeninfo v;
     if (ioctl(fd, FBIOGET_VSCREENINFO, &v) == 0 &&
-        (v.xres != g_win.width || v.yres != g_win.height || v.bits_per_pixel != 32)) {
-        LOG("fb0 was %ux%u@%u, setting %ux%u@32\n", v.xres, v.yres, v.bits_per_pixel, g_win.width, g_win.height);
+        (v.xres != g_win.width || v.yres != g_win.height || v.bits_per_pixel != 32 ||
+         v.yres_virtual != g_win.height * nbuf)) {
+        LOG("fb0 was %ux%u@%u, setting %ux%u@32 x%u\n", v.xres, v.yres, v.bits_per_pixel, g_win.width,
+            g_win.height, nbuf);
         v.xres = v.xres_virtual = g_win.width;
         v.yres = g_win.height;
-        v.yres_virtual = g_win.height * 2u;
+        v.yres_virtual = g_win.height * nbuf;
         v.xoffset = v.yoffset = 0;
         v.bits_per_pixel = 32;
         v.red = (struct fb_bitfield){16, 8, 0};
