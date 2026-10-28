@@ -4,6 +4,7 @@
 #include "../gfx/resources.hpp"
 #include "../gfx/pipeline_cache.hpp"
 #include "../gfx/resource_cache.hpp"
+#include "../webgpu/gpu.hpp"
 
 #include "gx_fmt.hpp"
 #include "shader_info.hpp"
@@ -140,14 +141,28 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
   const std::array immediateOffsets{data.immediateRange.offset};
   pass.SetBindGroup(3, resources.uniformBindGroup, immediateOffsets.size(), immediateOffsets.data());
 #else
-  pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
+  // Texture vertex fetch pulls indices in the shader (gx/shader.cpp, apply_vertex_fetch_textures):
+  // the draw is non-indexed and _pad carries the first index (in u16 units), or ~0u if unindexed.
+  const bool pullIndices = webgpu::g_vertexFetchTextures;
+  if (pullIndices) {
+    auto immediates = data.immediateData;
+    immediates._pad = data.indexCount != 0 ? data.idxRange.offset / sizeof(u16) : UINT32_MAX;
+    pass.SetImmediates(0, &immediates, sizeof(immediates));
+  } else {
+    pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
+  }
 #endif
   const std::array offsets{data.uniformRange.offset};
   pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
   if (data.bindGroups.textureBindGroup) {
     pass.SetBindGroup(2, gfx::find_bind_group(data.bindGroups.textureBindGroup));
   }
-  pass.SetIndexBuffer(resources.indexBuffer, wgpu::IndexFormat::Uint16, data.idxRange.offset, data.idxRange.size);
+#ifdef __EMSCRIPTEN__
+  constexpr bool pullIndices = false;
+#endif
+  if (!pullIndices) {
+    pass.SetIndexBuffer(resources.indexBuffer, wgpu::IndexFormat::Uint16, data.idxRange.offset, data.idxRange.size);
+  }
   if (data.dstAlpha != UINT32_MAX) {
     const wgpu::Color color{0.f, 0.f, 0.f, data.dstAlpha / 255.f};
     pass.SetBlendConstant(&color);
@@ -155,6 +170,8 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
   const auto draw = [&] {
     if (data.indexCount == 0) {
       pass.Draw(data.vtxCount, data.instanceCount);
+    } else if (pullIndices) {
+      pass.Draw(data.indexCount, data.instanceCount);
     } else {
       pass.DrawIndexed(data.indexCount, data.instanceCount);
     }

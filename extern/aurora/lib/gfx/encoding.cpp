@@ -492,6 +492,7 @@ void submit_frame_upload(const FramePacket& frame) {
   copyPool(StorageStagingOffset, res.storageBuffer, frame.storage.size());
   copy_staging_to_fetch_texture(cmd, staging, VertexStagingOffset, res.vertexFetchTexture, frame.verts.size());
   copy_staging_to_fetch_texture(cmd, staging, StorageStagingOffset, res.storageFetchTexture, frame.storage.size());
+  copy_staging_to_fetch_texture(cmd, staging, IndexStagingOffset, res.indexFetchTexture, frame.indices.size());
   const wgpu::CommandBuffer buffer = cmd.Finish();
   g_queue.Submit(1, &buffer);
 #else

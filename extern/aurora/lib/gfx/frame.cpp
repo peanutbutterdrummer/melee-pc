@@ -479,7 +479,7 @@ void initialize() {
   }
 
   {
-    std::array layoutEntries{
+    std::vector layoutEntries{
         // Vertex data buffer
         wgpu::BindGroupLayoutEntry{
             .binding = 0,
@@ -500,7 +500,12 @@ void initialize() {
         },
     };
     if (webgpu::g_vertexFetchTextures) {
-      // Same bindings as r32uint textures; see gx/shader.cpp (apply_vertex_fetch_textures).
+      // Same bindings as r32uint textures, plus the index data; see gx/shader.cpp
+      // (apply_vertex_fetch_textures).
+      layoutEntries.push_back(wgpu::BindGroupLayoutEntry{
+          .binding = 2,
+          .visibility = wgpu::ShaderStage::Vertex,
+      });
       for (auto& entry : layoutEntries) {
         entry.buffer.type = wgpu::BufferBindingType::BindingNotUsed;
         entry.texture = wgpu::TextureBindingLayout{
@@ -555,7 +560,7 @@ void initialize() {
     createBuffer(res.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, StorageBufferSize,
                  "Shared Storage Buffer");
 
-    std::array staticEntries{
+    std::vector staticEntries{
         wgpu::BindGroupEntry{
             .binding = 0,
             .buffer = res.vertexBuffer,
@@ -577,10 +582,15 @@ void initialize() {
       };
       createFetchTexture(res.vertexFetchTexture, VertexBufferSize, "Vertex Fetch Texture");
       createFetchTexture(res.storageFetchTexture, StorageBufferSize, "Storage Fetch Texture");
+      createFetchTexture(res.indexFetchTexture, IndexBufferSize, "Index Fetch Texture");
       staticEntries[0].buffer = nullptr;
       staticEntries[0].textureView = res.vertexFetchTexture.CreateView();
       staticEntries[1].buffer = nullptr;
       staticEntries[1].textureView = res.storageFetchTexture.CreateView();
+      staticEntries.push_back(wgpu::BindGroupEntry{
+          .binding = 2,
+          .textureView = res.indexFetchTexture.CreateView(),
+      });
     }
     const wgpu::BindGroupDescriptor staticDescriptor{
         .label = "Static bind group",
@@ -649,6 +659,7 @@ void shutdown() {
   }
   g_resources.vertexFetchTexture = {};
   g_resources.storageFetchTexture = {};
+  g_resources.indexFetchTexture = {};
   g_resources.vertexBuffer = {};
   g_resources.uniformBuffer = {};
   g_resources.indexBuffer = {};
