@@ -1,6 +1,8 @@
 #include "device.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <string_view>
 
 #include <SDL3/SDL_haptic.h>
@@ -199,16 +201,42 @@ void shutdown_rumble() noexcept {
 }
 } // namespace detail
 #elif !defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
-bool rumble_available() noexcept { return false; }
+/* AURORA_RUMBLE_SYSFS=<path>: an on/off motor switch written as "1"/"0"
+ * (Anbernic H700 stock firmware: /sys/class/power_supply/axp2202-battery/moto).
+ * Used for port 0 when the pad itself has no rumble. */
+namespace {
+const char* sysfs_motor_path() noexcept {
+  static const char* path = [] {
+    const char* env = std::getenv("AURORA_RUMBLE_SYSFS");
+    return env != nullptr && *env != '\0' ? env : nullptr;
+  }();
+  return path;
+}
+
+int g_sysfsMotorState = -1;
+
+void set_sysfs_motor(const bool on) noexcept {
+  const char* path = sysfs_motor_path();
+  if (path == nullptr || g_sysfsMotorState == static_cast<int>(on)) {
+    return;
+  }
+  if (FILE* file = std::fopen(path, "w"); file != nullptr) {
+    std::fputs(on ? "1" : "0", file);
+    std::fclose(file);
+    g_sysfsMotorState = on ? 1 : 0;
+  }
+}
+} // namespace
+
+bool rumble_available() noexcept { return sysfs_motor_path() != nullptr; }
 
 void rumble(const uint16_t lowFreq, const uint16_t highFreq, const uint16_t durationMs) noexcept {
-  static_cast<void>(lowFreq);
-  static_cast<void>(highFreq);
   static_cast<void>(durationMs);
+  set_sysfs_motor(lowFreq != 0 || highFreq != 0);
 }
 
 namespace detail {
-void shutdown_rumble() noexcept {}
+void shutdown_rumble() noexcept { set_sysfs_motor(false); }
 } // namespace detail
 #endif
 
