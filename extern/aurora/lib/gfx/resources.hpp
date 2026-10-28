@@ -31,7 +31,7 @@ inline constexpr uint64_t TextureUploadSize = 25165824; // 24 MiB
 // still read it. Mali otherwise copies the whole buffer or texture on the CPU at the next draw.
 inline constexpr size_t ResourceSlots = 3;
 
-// Texture vertex fetch: the vertex, storage and index data are read from r32uint textures this many
+// Texture vertex fetch: the vertex, storage and index data are read from rgba8uint textures this many
 // texels (u32 words) wide.
 inline constexpr uint32_t VertexFetchRowTexels = 4096;
 inline constexpr uint32_t VertexFetchRowBytes = VertexFetchRowTexels * 4;

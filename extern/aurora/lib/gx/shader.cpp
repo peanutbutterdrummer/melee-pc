@@ -888,7 +888,7 @@ void replace_all(std::string& s, std::string_view from, std::string_view to) {
   }
 }
 
-// Texture vertex fetch (webgpu::g_vertexFetchTextures): vbuf/abuf become r32uint textures that
+// Texture vertex fetch (webgpu::g_vertexFetchTextures): vbuf/abuf become rgba8uint textures that
 // mirror the GX data buffers row by row (gfx::VertexFetchRowTexels words per row), so every
 // helper takes a texture instead of a storage pointer and load_word() uses textureLoad.
 // Indices are pulled the same way from ibuf: draws are non-indexed and vertex_index counts from
@@ -904,7 +904,10 @@ void apply_vertex_fetch_textures(std::string& src) {
   replace_all(src, "&abuf", "abuf");
   // No bounds check: the data is always in range, and textureDimensions is not free on GLES.
   replace_all(src, "if (word_idx < arrayLength(p)) {", "{");
-  replace_all(src, "return p[word_idx];", "return textureLoad(p, vec2u(word_idx & 4095u, word_idx >> 12u), 0).x;");
+  // The fetch textures are rgba8uint (Mali uploads those far faster than r32uint): reassemble.
+  replace_all(src, "return p[word_idx];",
+              "let t = textureLoad(p, vec2u(word_idx & 4095u, word_idx >> 12u), 0);\n"
+              "    return t.x | (t.y << 8u) | (t.z << 16u) | (t.w << 24u);");
   replace_all(src, "abuf[imm.fog_range_base + u32(in.pos.x)]", "load_word(abuf, imm.fog_range_base + u32(in.pos.x))");
   replace_all(src, "    _pad: u32,", "    idx_start: u32,");
   replace_all(src, "@builtin(vertex_index) vidx: u32", "@builtin(vertex_index) vidx_raw: u32");

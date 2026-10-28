@@ -500,7 +500,7 @@ void initialize() {
         },
     };
     if (webgpu::g_vertexFetchTextures) {
-      // Same bindings as r32uint textures, plus the index data; see gx/shader.cpp
+      // Same bindings as rgba8uint textures, plus the index data; see gx/shader.cpp
       // (apply_vertex_fetch_textures).
       layoutEntries.push_back(wgpu::BindGroupLayoutEntry{
           .binding = 2,
@@ -576,7 +576,7 @@ void initialize() {
             .label = label,
             .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
             .size = {VertexFetchRowTexels, static_cast<uint32_t>(bufferSize / VertexFetchRowBytes), 1},
-            .format = wgpu::TextureFormat::R32Uint,
+            .format = wgpu::TextureFormat::RGBA8Uint,
         };
         out = g_device.CreateTexture(&descriptor);
       };

@@ -489,7 +489,7 @@ void submit_frame_upload(const FramePacket& frame) {
   copyPool(VertexStagingOffset, res.vertexBuffer, frame.verts.size());
   copyPool(UniformStagingOffset, res.uniformBuffer, frame.uniforms.size());
   copyPool(IndexStagingOffset, res.indexBuffer, frame.indices.size());
-  copyPool(StorageStagingOffset, res.storageBuffer, frame.storage.size());
+  // The storage pool is only read through its fetch texture on this path.
   copy_staging_to_fetch_texture(cmd, staging, VertexStagingOffset, res.vertexFetchTexture, frame.verts.size());
   copy_staging_to_fetch_texture(cmd, staging, StorageStagingOffset, res.storageFetchTexture, frame.storage.size());
   copy_staging_to_fetch_texture(cmd, staging, IndexStagingOffset, res.indexFetchTexture, frame.indices.size());
