@@ -13,7 +13,7 @@
  *
  * Env: FBEGL_REAL (default /usr/lib/libEGL.so.1), FBEGL_W/FBEGL_H (default
  * 720x480), FBEGL_LOG=1 for call logging on stderr, FBEGL_KEEPMODE=1 to leave
- * the framebuffer mode alone.
+ * the framebuffer mode alone, FBEGL_PROF=1 for GL call timing (glprof.c).
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -189,11 +189,13 @@ static const struct { const char* name; proc_t fn; } k_overrides[] = {
     {"eglChooseConfig", (proc_t)eglChooseConfig},
 };
 
+proc_t glprof_wrap(const char* name, proc_t real); /* glprof.c, FBEGL_PROF=1 */
+
 proc_t eglGetProcAddress(const char* name) {
     init();
     for (size_t i = 0; i < sizeof k_overrides / sizeof k_overrides[0]; i++)
         if (strcmp(name, k_overrides[i].name) == 0) return k_overrides[i].fn;
     proc_t p = real_proc(name);
     if (!p) LOG("eglGetProcAddress(%s) = NULL\n", name);
-    return p;
+    return glprof_wrap(name, p);
 }

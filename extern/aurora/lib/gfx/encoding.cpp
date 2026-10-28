@@ -34,6 +34,11 @@ namespace {
 constexpr Module Log{"aurora::gfx"};
 WGPURenderPipeline g_currentPipeline = nullptr;
 
+const wgpu::BindGroup& static_bind_group(const FramePacket& frame) {
+  auto& res = resources();
+  return webgpu::g_vertexFetchTextures ? res.fetchBindGroups[frame.frameId % VertexFetchRing] : res.staticBindGroup;
+}
+
 void apply_viewport(const wgpu::RenderPassEncoder& pass, const Viewport& vp) {
   const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
   const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
@@ -117,7 +122,7 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
   bool hasScissor = false;
 
   // Bind bind group for the whole pass
-  pass.SetBindGroup(0, resources().staticBindGroup);
+  pass.SetBindGroup(0, static_bind_group(frame));
   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
 
   for (auto& cmd : passInfo.commands) {
@@ -161,7 +166,7 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
     case CommandType::CustomDraw: {
       render_custom_draw(cmd.data.customDraw, pass, passInfo);
       g_currentPipeline = nullptr;
-      pass.SetBindGroup(0, resources().staticBindGroup);
+      pass.SetBindGroup(0, static_bind_group(frame));
       pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
       if (hasViewport) {
         apply_viewport(pass, currentViewport);
@@ -363,30 +368,26 @@ void copy_staging_buffer_range(wgpu::CommandEncoder& cmd, const FramePacket& fra
   copied = highWater;
 }
 
-// Texture vertex fetch: mirror the rows covering [begin, end) of a GX data buffer into its
-// r32uint texture, after the staging copy into the buffer in the same encoder.
-void mirror_fetch_texture_rows(wgpu::CommandEncoder& cmd, const wgpu::Buffer& src, const wgpu::Texture& dst,
-                               uint32_t begin, uint32_t end) {
-  if (end <= begin) {
+// Texture vertex fetch: copy the first `size` bytes of one staging pool into an r32uint fetch
+// texture, as whole VertexFetchRowBytes rows.
+void copy_staging_to_fetch_texture(wgpu::CommandEncoder& cmd, const wgpu::Buffer& staging, uint64_t stagingOffset,
+                                   const wgpu::Texture& dst, size_t size) {
+  const auto rows = static_cast<uint32_t>((size + VertexFetchRowBytes - 1) / VertexFetchRowBytes);
+  if (rows == 0) {
     return;
   }
-  const uint32_t firstRow = begin / VertexFetchRowBytes;
-  const uint32_t endRow = (end + VertexFetchRowBytes - 1) / VertexFetchRowBytes;
   const wgpu::TexelCopyBufferInfo source{
       .layout =
           wgpu::TexelCopyBufferLayout{
-              .offset = uint64_t{firstRow} * VertexFetchRowBytes,
+              .offset = stagingOffset,
               .bytesPerRow = VertexFetchRowBytes,
-              .rowsPerImage = endRow - firstRow,
+              .rowsPerImage = rows,
           },
-      .buffer = src,
+      .buffer = staging,
   };
-  const wgpu::TexelCopyTextureInfo destination{
-      .texture = dst,
-      .origin = {0, firstRow, 0},
-  };
-  const wgpu::Extent3D size{VertexFetchRowTexels, endRow - firstRow, 1};
-  cmd.CopyBufferToTexture(&source, &destination, &size);
+  const wgpu::TexelCopyTextureInfo destination{.texture = dst};
+  const wgpu::Extent3D extent{VertexFetchRowTexels, rows, 1};
+  cmd.CopyBufferToTexture(&source, &destination, &extent);
 }
 #endif
 
@@ -415,18 +416,12 @@ void copy_staging_to_high_water(wgpu::CommandEncoder& cmd, FramePacket& frame, c
   frame.copied.indices = highWater.indices;
   frame.copied.storage = highWater.storage;
 #else
-  const uint32_t vertsBegin = frame.copied.verts;
-  const uint32_t storageBegin = frame.copied.storage;
   copy_staging_buffer_range(cmd, frame, frame.copied.verts, highWater.verts, VertexStagingOffset, res.vertexBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.uniforms, highWater.uniforms, UniformStagingOffset,
                             res.uniformBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.indices, highWater.indices, IndexStagingOffset, res.indexBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.storage, highWater.storage, StorageStagingOffset,
                             res.storageBuffer);
-  if (webgpu::g_vertexFetchTextures) {
-    mirror_fetch_texture_rows(cmd, res.vertexBuffer, res.vertexFetchTexture, vertsBegin, frame.copied.verts);
-    mirror_fetch_texture_rows(cmd, res.storageBuffer, res.storageFetchTexture, storageBegin, frame.copied.storage);
-  }
 #endif
 
   if constexpr (UseTextureBuffer) {
@@ -470,6 +465,27 @@ void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op)
     }
     break;
   }
+}
+
+void submit_vertex_fetch_upload(const FramePacket& frame) {
+#ifndef __EMSCRIPTEN__
+  if (!webgpu::g_vertexFetchTextures) {
+    return;
+  }
+  // Submitted just before the frame's own command buffer, once the staging buffer is unmapped, so
+  // the frame's passes never modify a texture between draws.
+  auto& res = resources();
+  const size_t slot = frame.frameId % VertexFetchRing;
+  const auto& staging = staging_buffer(frame.stagingBuffer);
+  wgpu::CommandEncoder cmd = g_device.CreateCommandEncoder();
+  copy_staging_to_fetch_texture(cmd, staging, VertexStagingOffset, res.vertexFetchTextures[slot], frame.verts.size());
+  copy_staging_to_fetch_texture(cmd, staging, StorageStagingOffset, res.storageFetchTextures[slot],
+                                frame.storage.size());
+  const wgpu::CommandBuffer buffer = cmd.Finish();
+  g_queue.Submit(1, &buffer);
+#else
+  (void)frame;
+#endif
 }
 } // namespace detail
 

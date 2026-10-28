@@ -35,7 +35,9 @@ export MELEE_LOG_FILE="$GAMEDIR/melee.log"
 export SDL_GAMECONTROLLERCONFIG="19000000010000000100000000010000,ANBERNIC-keys,a:b0,b:b1,x:b3,y:b2,back:b8,guide:b6,start:b7,leftstick:b9,rightstick:b12,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpleft:h0.8,dpdown:h0.4,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b10,righttrigger:b11,platform:Linux,"
 
 chmod 666 /dev/uinput 2>/dev/null
-$GPTOKEYB "melee" -c "$GAMEDIR/melee.gptk" &
+# Select+Start quits: gptokeyb killall()s by process name, and aurora renames the
+# game's main thread to "Main thread".
+$GPTOKEYB "Main thread" -c "$GAMEDIR/melee.gptk" &
 ./melee ${DISC:+"$DISC"}
 echo "[rg34xx] exit status $?"
 pm_finish

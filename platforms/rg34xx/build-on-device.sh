@@ -15,7 +15,7 @@ mkdir -p "$BUILD/shim/lib"
 gcc-12 -O2 -c -o "$BUILD/shim/glibc238compat.o" "$SHIM/glibc238compat.c"
 g++-12 -O2 -c -o "$BUILD/shim/libstdcxx13compat.o" "$SHIM/libstdcxx13compat.cpp"
 # Runtime shims: libEGL.so (fbdev window surface) and a stand-in libX11.so.6.
-gcc-12 -O2 -Wall -fPIC -shared -o "$BUILD/shim/lib/libEGL.so" "$SHIM/fbegl.c" -ldl
+gcc-12 -O2 -Wall -fPIC -shared -o "$BUILD/shim/lib/libEGL.so" "$SHIM/fbegl.c" "$SHIM/glprof.c" -ldl
 gcc-12 -O2 -Wall -fPIC -shared -Wl,-soname,libX11.so.6 -o "$BUILD/shim/lib/libX11.so.6" "$SHIM/fakex11.c"
 
 configure() {

@@ -25,10 +25,13 @@ inline constexpr uint64_t StorageBufferSize = 8388608;  // 8 MiB
 inline constexpr uint64_t TextureUploadSize = 25165824; // 24 MiB
 #endif
 
-// Texture vertex fetch (webgpu::g_vertexFetchTextures): the vertex and storage buffers are
-// mirrored row by row into r32uint textures this many texels (u32 words) wide.
+// Texture vertex fetch (webgpu::g_vertexFetchTextures): each frame's vertex and storage data is
+// copied once, before the frame's commands, into r32uint textures this many texels (u32 words)
+// wide. The textures rotate over VertexFetchRing frames so a frame never writes textures that an
+// in-flight frame still reads (Mali copies the whole texture on the CPU when that happens).
 inline constexpr uint32_t VertexFetchRowTexels = 4096;
 inline constexpr uint32_t VertexFetchRowBytes = VertexFetchRowTexels * 4;
+inline constexpr size_t VertexFetchRing = 3;
 static_assert(VertexBufferSize % VertexFetchRowBytes == 0 && StorageBufferSize % VertexFetchRowBytes == 0);
 
 namespace detail {
@@ -37,8 +40,10 @@ struct Resources {
   wgpu::Buffer uniformBuffer;
   wgpu::Buffer indexBuffer;
   wgpu::Buffer storageBuffer;
-  wgpu::Texture vertexFetchTexture;  // only with webgpu::g_vertexFetchTextures
-  wgpu::Texture storageFetchTexture; // only with webgpu::g_vertexFetchTextures
+  // Only with webgpu::g_vertexFetchTextures; indexed by frameId % VertexFetchRing.
+  std::array<wgpu::Texture, VertexFetchRing> vertexFetchTextures;
+  std::array<wgpu::Texture, VertexFetchRing> storageFetchTextures;
+  std::array<wgpu::BindGroup, VertexFetchRing> fetchBindGroups;
   wgpu::BindGroupLayout staticBindGroupLayout;
   wgpu::BindGroup staticBindGroup;
   wgpu::BindGroupLayout uniformBindGroupLayout;
