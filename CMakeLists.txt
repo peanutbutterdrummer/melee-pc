@@ -458,8 +458,9 @@ if (MELEE_ENABLE_LTO)
     endif ()
 endif ()
 
-if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_CROSSCOMPILING)
     # Unit tests: `ninja -C build unit_tests && ctest --test-dir build -L melee`
+    # Host-run only; aurora also skips its test targets when cross-compiling.
     # (aurora registers its own tests, unbuilt here).
     enable_testing()
     add_custom_target(unit_tests)
