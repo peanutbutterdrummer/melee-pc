@@ -1,4 +1,5 @@
 #include "../gfx/hash.hpp"
+#include "../gfx/resources.hpp"
 #include "../gfx/types.hpp"
 
 #include "../internal.hpp"
@@ -880,6 +881,27 @@ auto lighting_func(const ShaderConfig& config, const ColorChannelConfig& cc, u8 
 }
 
 absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
+
+void replace_all(std::string& s, std::string_view from, std::string_view to) {
+  for (size_t at = s.find(from); at != std::string::npos; at = s.find(from, at + to.size())) {
+    s.replace(at, from.size(), to);
+  }
+}
+
+// Texture vertex fetch (webgpu::g_vertexFetchTextures): vbuf/abuf become r32uint textures that
+// mirror the GX data buffers row by row (gfx::VertexFetchRowTexels words per row), so every
+// helper takes a texture instead of a storage pointer and load_word() uses textureLoad.
+void apply_vertex_fetch_textures(std::string& src) {
+  static_assert(gfx::VertexFetchRowTexels == 4096, "load_word below hardcodes the row width");
+  replace_all(src, "var<storage, read> vbuf: array<u32>;", "var vbuf: texture_2d<u32>;");
+  replace_all(src, "var<storage, read> abuf: array<u32>;", "var abuf: texture_2d<u32>;");
+  replace_all(src, "ptr<storage, array<u32>>", "texture_2d<u32>");
+  replace_all(src, "&vbuf", "vbuf");
+  replace_all(src, "&abuf", "abuf");
+  replace_all(src, "word_idx < arrayLength(p)", "(word_idx >> 12u) < textureDimensions(p).y");
+  replace_all(src, "return p[word_idx];", "return textureLoad(p, vec2u(word_idx & 4095u, word_idx >> 12u), 0).x;");
+  replace_all(src, "abuf[imm.fog_range_base + u32(in.pos.x)]", "load_word(abuf, imm.fog_range_base + u32(in.pos.x))");
+}
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlphaMode,
@@ -2185,6 +2207,9 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
                                         uniBufAttrs, texBindings, vtxOutAttrs, vtxInAttrs, vtxXfrAttrs, fragmentFn,
                                         fragmentFnPre, vtxXfrAttrsPre, uniformPre, fragOutStruct, fragRetType,
                                         fragReturn, gxBitsBody);
+  if (webgpu::g_vertexFetchTextures) {
+    apply_vertex_fetch_textures(shaderSource);
+  }
   if (dstAlphaMode == DstAlphaMode::DualSource) {
     shaderSource.insert(0, "enable dual_source_blending;\n");
   }

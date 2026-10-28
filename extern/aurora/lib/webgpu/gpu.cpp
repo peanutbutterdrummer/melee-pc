@@ -67,6 +67,7 @@ bool g_dualSourceBlendingSupported = false;
 bool g_bcTexturesSupported = false;
 bool g_astcTexturesSupported = false;
 bool g_textureComponentSwizzleSupported = false;
+bool g_vertexFetchTextures = false;
 static std::atomic_bool g_initialized = false;
 // Set by the device-lost callback for any reason but Destroyed. Checked at the end of initialize()
 // so a device that dies while its first pipelines compile fails over to the next backend instead
@@ -955,11 +956,23 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
            g_adapterInfo.deviceID, description);
 
   {
+    wgpu::CompatibilityModeLimits supportedCompatLimits{};
     wgpu::Limits supportedLimits{};
+    supportedLimits.nextInChain = &supportedCompatLimits;
     g_adapter.GetLimits(&supportedLimits);
+    supportedLimits.nextInChain = nullptr;
+    // Without vertex-stage storage buffers, GX vertex pulling falls back to r32uint textures
+    // (gfx::VertexFetchRowTexels wide), and then no GX stage needs storage buffers at all.
+    g_vertexFetchTextures = g_backendType != wgpu::BackendType::Null &&
+                            supportedCompatLimits.maxStorageBuffersInVertexStage < 2;
+    if (g_vertexFetchTextures) {
+      Log.info("Adapter has {} vertex-stage storage buffers; using texture vertex fetch",
+               supportedCompatLimits.maxStorageBuffersInVertexStage);
+    }
     wgpu::CompatibilityModeLimits compatibilityModeLimits{wgpu::CompatibilityModeLimits::Init{
-        .maxStorageBuffersInVertexStage = 2,
-        .maxStorageBuffersInFragmentStage = 2,
+        .maxStorageBuffersInVertexStage = g_vertexFetchTextures ? 0u : 2u,
+        .maxStorageBuffersInFragmentStage =
+            g_vertexFetchTextures ? std::min(2u, supportedCompatLimits.maxStorageBuffersInFragmentStage) : 2u,
     }};
     const wgpu::Limits requiredLimits{
         .nextInChain = &compatibilityModeLimits,

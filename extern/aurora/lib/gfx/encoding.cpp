@@ -362,6 +362,32 @@ void copy_staging_buffer_range(wgpu::CommandEncoder& cmd, const FramePacket& fra
                          copyEnd - copyStart);
   copied = highWater;
 }
+
+// Texture vertex fetch: mirror the rows covering [begin, end) of a GX data buffer into its
+// r32uint texture, after the staging copy into the buffer in the same encoder.
+void mirror_fetch_texture_rows(wgpu::CommandEncoder& cmd, const wgpu::Buffer& src, const wgpu::Texture& dst,
+                               uint32_t begin, uint32_t end) {
+  if (end <= begin) {
+    return;
+  }
+  const uint32_t firstRow = begin / VertexFetchRowBytes;
+  const uint32_t endRow = (end + VertexFetchRowBytes - 1) / VertexFetchRowBytes;
+  const wgpu::TexelCopyBufferInfo source{
+      .layout =
+          wgpu::TexelCopyBufferLayout{
+              .offset = uint64_t{firstRow} * VertexFetchRowBytes,
+              .bytesPerRow = VertexFetchRowBytes,
+              .rowsPerImage = endRow - firstRow,
+          },
+      .buffer = src,
+  };
+  const wgpu::TexelCopyTextureInfo destination{
+      .texture = dst,
+      .origin = {0, firstRow, 0},
+  };
+  const wgpu::Extent3D size{VertexFetchRowTexels, endRow - firstRow, 1};
+  cmd.CopyBufferToTexture(&source, &destination, &size);
+}
 #endif
 
 bool needs_staging_copy(const FramePacket& frame, const FrameOp& op) {
@@ -389,12 +415,18 @@ void copy_staging_to_high_water(wgpu::CommandEncoder& cmd, FramePacket& frame, c
   frame.copied.indices = highWater.indices;
   frame.copied.storage = highWater.storage;
 #else
+  const uint32_t vertsBegin = frame.copied.verts;
+  const uint32_t storageBegin = frame.copied.storage;
   copy_staging_buffer_range(cmd, frame, frame.copied.verts, highWater.verts, VertexStagingOffset, res.vertexBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.uniforms, highWater.uniforms, UniformStagingOffset,
                             res.uniformBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.indices, highWater.indices, IndexStagingOffset, res.indexBuffer);
   copy_staging_buffer_range(cmd, frame, frame.copied.storage, highWater.storage, StorageStagingOffset,
                             res.storageBuffer);
+  if (webgpu::g_vertexFetchTextures) {
+    mirror_fetch_texture_rows(cmd, res.vertexBuffer, res.vertexFetchTexture, vertsBegin, frame.copied.verts);
+    mirror_fetch_texture_rows(cmd, res.storageBuffer, res.storageFetchTexture, storageBegin, frame.copied.storage);
+  }
 #endif
 
   if constexpr (UseTextureBuffer) {

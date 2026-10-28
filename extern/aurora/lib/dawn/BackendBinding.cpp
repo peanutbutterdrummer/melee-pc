@@ -46,6 +46,16 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Wind
     desc->window = SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
     return std::move(desc);
   }
+  if (SDL_strcmp(driver, "offscreen") == 0) {
+    // Mali fbdev handhelds (e.g. Anbernic stock firmware) have no window system,
+    // so SDL runs its offscreen driver. Hand Dawn a placeholder Xlib surface: the
+    // port's libEGL shim maps it to the framebuffer and its stand-in libX11
+    // validates it (see platforms/rg34xx).
+    std::shared_ptr<wgpu::SurfaceSourceXlibWindow> desc = std::make_shared<wgpu::SurfaceSourceXlibWindow>();
+    desc->display = reinterpret_cast<void*>(1);
+    desc->window = 1;
+    return std::move(desc);
+  }
 #endif
   return nullptr;
 #endif

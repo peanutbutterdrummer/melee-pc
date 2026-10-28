@@ -445,13 +445,28 @@ void initialize() {
   };
   createBuffer(g_resources.uniformBuffer, wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, UniformBufferSize,
                "Shared Uniform Buffer");
+  // Texture vertex fetch copies these two buffers into textures each frame.
+  const auto fetchCopySrc = webgpu::g_vertexFetchTextures ? wgpu::BufferUsage::CopySrc : wgpu::BufferUsage::None;
   createBuffer(g_resources.vertexBuffer,
-               wgpu::BufferUsage::Storage | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst, VertexBufferSize,
-               "Shared Vertex Buffer");
+               wgpu::BufferUsage::Storage | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst | fetchCopySrc,
+               VertexBufferSize, "Shared Vertex Buffer");
   createBuffer(g_resources.indexBuffer, wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst, IndexBufferSize,
                "Shared Index Buffer");
-  createBuffer(g_resources.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, StorageBufferSize,
-               "Shared Storage Buffer");
+  createBuffer(g_resources.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst | fetchCopySrc,
+               StorageBufferSize, "Shared Storage Buffer");
+  if (webgpu::g_vertexFetchTextures) {
+    const auto createFetchTexture = [](wgpu::Texture& out, uint64_t bufferSize, const char* label) {
+      const wgpu::TextureDescriptor descriptor{
+          .label = label,
+          .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
+          .size = {VertexFetchRowTexels, static_cast<uint32_t>(bufferSize / VertexFetchRowBytes), 1},
+          .format = wgpu::TextureFormat::R32Uint,
+      };
+      out = g_device.CreateTexture(&descriptor);
+    };
+    createFetchTexture(g_resources.vertexFetchTexture, VertexBufferSize, "Vertex Fetch Texture");
+    createFetchTexture(g_resources.storageFetchTexture, StorageBufferSize, "Storage Fetch Texture");
+  }
 #ifdef __EMSCRIPTEN__
   g_browserStagingBytes.resize(StagingBufferSize);
 #endif
@@ -478,7 +493,7 @@ void initialize() {
   }
 
   {
-    constexpr std::array layoutEntries{
+    std::array layoutEntries{
         // Vertex data buffer
         wgpu::BindGroupLayoutEntry{
             .binding = 0,
@@ -498,13 +513,7 @@ void initialize() {
                 },
         },
     };
-    const wgpu::BindGroupLayoutDescriptor layoutDesc{
-        .label = "Static bind group layout",
-        .entryCount = layoutEntries.size(),
-        .entries = layoutEntries.data(),
-    };
-    g_resources.staticBindGroupLayout = g_device.CreateBindGroupLayout(&layoutDesc);
-    const std::array entries{
+    std::array entries{
         wgpu::BindGroupEntry{
             .binding = 0,
             .buffer = g_resources.vertexBuffer,
@@ -514,6 +523,25 @@ void initialize() {
             .buffer = g_resources.storageBuffer,
         },
     };
+    if (webgpu::g_vertexFetchTextures) {
+      // Same bindings as r32uint textures; see gx/shader.cpp (apply_vertex_fetch_textures).
+      const wgpu::Texture* textures[] = {&g_resources.vertexFetchTexture, &g_resources.storageFetchTexture};
+      for (size_t i = 0; i < layoutEntries.size(); ++i) {
+        layoutEntries[i].buffer.type = wgpu::BufferBindingType::BindingNotUsed;
+        layoutEntries[i].texture = wgpu::TextureBindingLayout{
+            .sampleType = wgpu::TextureSampleType::Uint,
+            .viewDimension = wgpu::TextureViewDimension::e2D,
+        };
+        entries[i].buffer = nullptr;
+        entries[i].textureView = textures[i]->CreateView();
+      }
+    }
+    const wgpu::BindGroupLayoutDescriptor layoutDesc{
+        .label = "Static bind group layout",
+        .entryCount = layoutEntries.size(),
+        .entries = layoutEntries.data(),
+    };
+    g_resources.staticBindGroupLayout = g_device.CreateBindGroupLayout(&layoutDesc);
     const wgpu::BindGroupDescriptor bindGroupDescriptor{
         .label = "Static bind group",
         .layout = g_resources.staticBindGroupLayout,
@@ -599,6 +627,8 @@ void shutdown() {
   g_resources.uniformBuffer = {};
   g_resources.indexBuffer = {};
   g_resources.storageBuffer = {};
+  g_resources.vertexFetchTexture = {};
+  g_resources.storageFetchTexture = {};
   g_stagingBuffers.fill({});
 #ifdef __EMSCRIPTEN__
   EM_ASM({ delete Module.gpuUploadScratch; });

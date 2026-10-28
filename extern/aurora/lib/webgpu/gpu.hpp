@@ -64,6 +64,10 @@ extern bool g_bcTexturesSupported;
 extern bool g_astcTexturesSupported;
 extern bool g_textureComponentSwizzleSupported;
 extern bool g_dualSourceBlendingSupported;
+// GX vertex pulling reads its vertex/attribute data from r32uint textures instead of storage
+// buffers. Set when the adapter has fewer than 2 storage buffers in the vertex stage (e.g. Mali
+// GLES drivers report 0).
+extern bool g_vertexFetchTextures;
 
 bool initialize(AuroraBackend backend, bool allowCpu);
 void shutdown();

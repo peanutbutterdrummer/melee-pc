@@ -25,12 +25,20 @@ inline constexpr uint64_t StorageBufferSize = 8388608;  // 8 MiB
 inline constexpr uint64_t TextureUploadSize = 25165824; // 24 MiB
 #endif
 
+// Texture vertex fetch (webgpu::g_vertexFetchTextures): the vertex and storage buffers are
+// mirrored row by row into r32uint textures this many texels (u32 words) wide.
+inline constexpr uint32_t VertexFetchRowTexels = 4096;
+inline constexpr uint32_t VertexFetchRowBytes = VertexFetchRowTexels * 4;
+static_assert(VertexBufferSize % VertexFetchRowBytes == 0 && StorageBufferSize % VertexFetchRowBytes == 0);
+
 namespace detail {
 struct Resources {
   wgpu::Buffer vertexBuffer;
   wgpu::Buffer uniformBuffer;
   wgpu::Buffer indexBuffer;
   wgpu::Buffer storageBuffer;
+  wgpu::Texture vertexFetchTexture;  // only with webgpu::g_vertexFetchTextures
+  wgpu::Texture storageFetchTexture; // only with webgpu::g_vertexFetchTextures
   wgpu::BindGroupLayout staticBindGroupLayout;
   wgpu::BindGroup staticBindGroup;
   wgpu::BindGroupLayout uniformBindGroupLayout;
