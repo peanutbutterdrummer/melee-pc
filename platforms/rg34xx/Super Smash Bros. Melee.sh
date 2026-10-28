@@ -34,6 +34,18 @@ export MELEE_LOG_FILE="$GAMEDIR/melee.log"
 # right stick = C-stick, Select = settings overlay, Select+Start = quit.
 export SDL_GAMECONTROLLERCONFIG="19000000010000000100000000010000,ANBERNIC-keys,a:b0,b:b1,x:b3,y:b2,back:b8,guide:b6,start:b7,leftstick:b9,rightstick:b12,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpleft:h0.8,dpdown:h0.4,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b10,righttrigger:b11,platform:Linux,"
 
+# Settings live in melee/user/ (portable.txt). First run: the cheapest settings
+# (1x internal resolution, no AA/anisotropy, no reverb). Always fullscreen: the
+# window is the 720x480 framebuffer; windowed mode would render a 1280x960 window.
+CFG="$GAMEDIR/user/launcher.cfg"
+mkdir -p "$GAMEDIR/user"
+[ -f "$CFG" ] || printf 'render_scale 1\nmsaa 1\nanisotropy 1\nreverb 0\n' > "$CFG"
+if grep -q '^fullscreen ' "$CFG"; then
+  sed -i 's/^fullscreen .*/fullscreen 1/' "$CFG"
+else
+  echo 'fullscreen 1' >> "$CFG"
+fi
+
 chmod 666 /dev/uinput 2>/dev/null
 # Select+Start quits: gptokeyb killall()s by process name, and aurora renames the
 # game's main thread to "Main thread".
