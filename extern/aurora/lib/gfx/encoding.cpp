@@ -362,29 +362,6 @@ void copy_staging_buffer_range(wgpu::CommandEncoder& cmd, const FramePacket& fra
                          copyEnd - copyStart);
   copied = highWater;
 }
-
-// Texture vertex fetch: copy the first `size` bytes of one staging pool into an r32uint fetch
-// texture, as whole VertexFetchRowBytes rows.
-void copy_staging_to_fetch_texture(wgpu::CommandEncoder& cmd, const wgpu::Buffer& staging, uint64_t stagingOffset,
-                                   const wgpu::Texture& dst, size_t size) {
-  const auto rows = std::min(static_cast<uint32_t>((size + VertexFetchRowBytes - 1) / VertexFetchRowBytes),
-                             dst.GetHeight());
-  if (rows == 0) {
-    return;
-  }
-  const wgpu::TexelCopyBufferInfo source{
-      .layout =
-          wgpu::TexelCopyBufferLayout{
-              .offset = stagingOffset,
-              .bytesPerRow = VertexFetchRowBytes,
-              .rowsPerImage = rows,
-          },
-      .buffer = staging,
-  };
-  const wgpu::TexelCopyTextureInfo destination{.texture = dst};
-  const wgpu::Extent3D extent{VertexFetchRowTexels, rows, 1};
-  cmd.CopyBufferToTexture(&source, &destination, &extent);
-}
 #endif
 
 bool needs_staging_copy(const FramePacket& frame, const FrameOp& op) {
@@ -476,25 +453,37 @@ void submit_frame_upload(const FramePacket& frame) {
     return;
   }
   // Per-frame resource slots: upload the whole frame's pools into its slot (selected by the
-  // caller) in a command buffer submitted just before the frame's own, once the staging buffer is
-  // unmapped. The frame's passes then never write a buffer or texture between draws.
+  // caller) before the frame's commands are submitted. Called while the staging buffer is still
+  // mapped: on GL, WriteBuffer/WriteTexture become glBufferSubData/glTexSubImage2D from CPU
+  // memory, which Mali handles without the GPU-side copies (and their syncs) a staging copy needs.
+  // The slot is never in use by an in-flight frame, so nothing is written under a draw.
   auto& res = resources();
-  const auto& staging = staging_buffer(frame.stagingBuffer);
-  wgpu::CommandEncoder cmd = g_device.CreateCommandEncoder();
-  const auto copyPool = [&](uint64_t stagingOffset, const wgpu::Buffer& dst, size_t size) {
-    if (size != 0) {
-      cmd.CopyBufferToBuffer(staging, stagingOffset, dst, 0, AURORA_ALIGN(size, 4));
+  const auto writePool = [](const wgpu::Buffer& dst, const ByteBuffer& data) {
+    if (data.size() != 0) {
+      g_queue.WriteBuffer(dst, 0, data.data(), AURORA_ALIGN(data.size(), 4));
     }
   };
-  copyPool(VertexStagingOffset, res.vertexBuffer, frame.verts.size());
-  copyPool(UniformStagingOffset, res.uniformBuffer, frame.uniforms.size());
-  copyPool(IndexStagingOffset, res.indexBuffer, frame.indices.size());
-  copyPool(StorageStagingOffset, res.storageBuffer, frame.storage.size());
-  copy_staging_to_fetch_texture(cmd, staging, VertexStagingOffset, res.vertexFetchTexture, frame.verts.size());
-  copy_staging_to_fetch_texture(cmd, staging, StorageStagingOffset, res.storageFetchTexture, frame.storage.size());
-  copy_staging_to_fetch_texture(cmd, staging, IndexStagingOffset, res.indexFetchTexture, frame.indices.size());
-  const wgpu::CommandBuffer buffer = cmd.Finish();
-  g_queue.Submit(1, &buffer);
+  // The fetch textures take whole rows; the pools' capacity is a whole number of rows, so the
+  // mapped memory past the frame's data is still valid to read.
+  const auto writeFetchTexture = [](const wgpu::Texture& dst, const ByteBuffer& data) {
+    const auto rows = std::min(static_cast<uint32_t>((data.size() + VertexFetchRowBytes - 1) / VertexFetchRowBytes),
+                               dst.GetHeight());
+    if (rows == 0) {
+      return;
+    }
+    const wgpu::TexelCopyTextureInfo destination{.texture = dst};
+    const wgpu::TexelCopyBufferLayout layout{.bytesPerRow = VertexFetchRowBytes, .rowsPerImage = rows};
+    const wgpu::Extent3D extent{VertexFetchRowTexels, rows, 1};
+    g_queue.WriteTexture(&destination, data.data(), size_t{rows} * VertexFetchRowBytes, &layout, &extent);
+  };
+  writePool(res.uniformBuffer, frame.uniforms);
+  // GX reads vertices, indices and storage through the fetch textures; the buffers still back
+  // other draws (RmlUi) that bind them directly.
+  writePool(res.vertexBuffer, frame.verts);
+  writePool(res.indexBuffer, frame.indices);
+  writeFetchTexture(res.vertexFetchTexture, frame.verts);
+  writeFetchTexture(res.storageFetchTexture, frame.storage);
+  writeFetchTexture(res.indexFetchTexture, frame.indices);
 #else
   (void)frame;
 #endif

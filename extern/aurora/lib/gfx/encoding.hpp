@@ -9,8 +9,8 @@ void bind_pipeline(const wgpu::RenderPipeline& pipeline, const wgpu::RenderPassE
 
 namespace detail {
 void encode_op(wgpu::CommandEncoder& encoder, FramePacket& frame, const FrameOp& op);
-// Per-frame resource slots: upload the frame's pools into its slot (select it first). Call after
-// the staging buffer is unmapped and before the frame's command buffer is submitted.
+// Per-frame resource slots: upload the frame's pools into its slot (select it first). Call while
+// the staging buffer is still mapped, before the frame's command buffer is submitted.
 void submit_frame_upload(const FramePacket& frame);
 }
 
