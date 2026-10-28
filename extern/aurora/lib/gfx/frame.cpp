@@ -454,11 +454,17 @@ void initialize() {
   createBuffer(g_resources.storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, StorageBufferSize,
                "Shared Storage Buffer");
   if (webgpu::g_vertexFetchTextures) {
+    // Experiment: AURORA_FETCH_ROWS caps the texture height (data past it is dropped).
+    static const uint32_t rowCap = getenv("AURORA_FETCH_ROWS") ? atoi(getenv("AURORA_FETCH_ROWS")) : 0;
     const auto createFetchTexture = [](wgpu::Texture& out, uint64_t bufferSize, const char* label) {
+      uint32_t rows = static_cast<uint32_t>(bufferSize / VertexFetchRowBytes);
+      if (rowCap != 0 && rowCap < rows) {
+        rows = rowCap;
+      }
       const wgpu::TextureDescriptor descriptor{
           .label = label,
           .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
-          .size = {VertexFetchRowTexels, static_cast<uint32_t>(bufferSize / VertexFetchRowBytes), 1},
+          .size = {VertexFetchRowTexels, rows, 1},
           .format = wgpu::TextureFormat::R32Uint,
       };
       out = g_device.CreateTexture(&descriptor);

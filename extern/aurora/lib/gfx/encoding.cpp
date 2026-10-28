@@ -372,7 +372,8 @@ void copy_staging_buffer_range(wgpu::CommandEncoder& cmd, const FramePacket& fra
 // texture, as whole VertexFetchRowBytes rows.
 void copy_staging_to_fetch_texture(wgpu::CommandEncoder& cmd, const wgpu::Buffer& staging, uint64_t stagingOffset,
                                    const wgpu::Texture& dst, size_t size) {
-  const auto rows = static_cast<uint32_t>((size + VertexFetchRowBytes - 1) / VertexFetchRowBytes);
+  const auto rows = std::min(static_cast<uint32_t>((size + VertexFetchRowBytes - 1) / VertexFetchRowBytes),
+                             dst.GetHeight());
   if (rows == 0) {
     return;
   }
