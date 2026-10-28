@@ -24,7 +24,10 @@ Vec4<float> texture_size_bias(const gfx::TextureBind& tex) {
     const float replacementScale = static_cast<float>(tex.ref->size.width) / std::max(width, 1.f);
     vpBias = std::log2(viewportScale / std::max(replacementScale, 0.001f));
   }
-  return {width, height, tex.texObj.lod_bias() + vpBias, 0.0f};
+  // w: mip level count, so shaders need not call textureNumLevels (emulated per draw through a
+  // uniform buffer update on GLES).
+  const float mips = tex.ref ? static_cast<float>(tex.ref->mipCount) : 1.f;
+  return {width, height, tex.texObj.lod_bias() + vpBias, mips};
 }
 
 void color_arg_reg_info(GXTevColorArg arg, const TevStage& stage, ShaderInfo& info) {

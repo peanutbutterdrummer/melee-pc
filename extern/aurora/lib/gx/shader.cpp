@@ -1611,7 +1611,9 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
     // EFB copies (including projected fighter shadows) have only level zero.
     // Avoid implicit LOD for those textures: projected coordinates outside the
     // image produced black samples on Intel Vulkan even with a clamped sampler.
-    // Keep implicit derivatives and LOD bias for textures that actually have mips.
+    // Keep implicit derivatives and LOD bias for textures that actually have mips. The mip
+    // count comes from the uniform (size_bias.w): textureNumLevels costs a uniform buffer
+    // update per draw on GLES, which stalls Mali drivers.
     // AURORA_LEGACY_TEX_LOD=1 restores the old unconditional bias sample: the
     // positive control for the black-floor sweep, so the detector is testable.
     static const bool legacyTexLod = getenv("AURORA_LEGACY_TEX_LOD") != nullptr;
@@ -1622,7 +1624,7 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
     } else {
       fragmentFnPre += fmt::format(
           "\n    var sampled{0}: vec4f;"
-          "\n    if (textureNumLevels(tex{1}) == 1u) {{"
+          "\n    if (ubuf.tex{1}_size_bias.w <= 1.0) {{"
           "\n        sampled{0} = textureSampleLevel(tex{1}, tex{1}_samp, {2}, 0.0);"
           "\n    }} else {{"
           "\n        sampled{0} = textureSampleBias(tex{1}, tex{1}_samp, {2}, ubuf.tex{1}_size_bias.z);"
