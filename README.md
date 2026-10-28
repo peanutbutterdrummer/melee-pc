@@ -1,5 +1,11 @@
 # melee-pc
 
+> **This fork: Anbernic RG34XXSP (H700) stock firmware build.** Download the
+> ready-to-play zip from [Releases](https://github.com/peanutbutterdrummer/melee-pc/releases)
+> and read [platforms/rg34xx/README-rg34xx.md](platforms/rg34xx/README-rg34xx.md)
+> for install steps and controls. No game data is included; bring your own
+> GALE01 rev 2 disc image. The rest of this README is upstream's.
+
 **Beta, for testing only.** "melee-pc" is a working name. Online play with
 rollback netcode is in development. This branch includes LAN, internet friend
 codes, Unranked matchmaking and ranked best-of-three sets. See
