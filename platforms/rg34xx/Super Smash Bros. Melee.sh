@@ -44,12 +44,21 @@ export SDL_GAMECONTROLLERCONFIG="19000000010000000100000000010000,ANBERNIC-keys,
 # window is the 720x480 framebuffer; windowed mode would render a 1280x960 window.
 CFG="$GAMEDIR/user/launcher.cfg"
 mkdir -p "$GAMEDIR/user"
-[ -f "$CFG" ] || printf 'render_scale 1\nmsaa 1\nanisotropy 1\nreverb 0\n' > "$CFG"
+[ -f "$CFG" ] || printf 'render_scale 1\nmsaa 1\nanisotropy 1\nreverb 0\ncheck_updates 0\n' > "$CFG"
 if grep -q '^fullscreen ' "$CFG"; then
   sed -i 's/^fullscreen .*/fullscreen 1/' "$CFG"
 else
   echo 'fullscreen 1' >> "$CFG"
 fi
+
+# Prebuilt shader cache (melee/shadercache/, compiled on an RG34XXSP running
+# stock firmware): installed once, never over an existing cache. Without it,
+# every new effect is compiled on first sight and stays invisible meanwhile.
+for db in pipeline_cache.db dawn_cache.db; do
+  if [ -f "$GAMEDIR/shadercache/$db" ] && [ ! -f "$GAMEDIR/user/$db" ]; then
+    cp "$GAMEDIR/shadercache/$db" "$GAMEDIR/user/$db" && echo "[rg34xx] installed prebuilt $db"
+  fi
+done
 
 chmod 666 /dev/uinput 2>/dev/null
 # Select+Start quits: gptokeyb killall()s by process name, and aurora renames the
